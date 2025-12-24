@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ค้นหาข้อมูลสินค้า CHV MRC</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { padding: 20px; background-color: #f8f9fa; }
+        .loading { text-align: center; margin-top: 20px; color: #666; }
+        /* ซ่อนตารางตอนยังไม่โหลด */
+        #resultTable { display: none; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2 class="mb-4">🔍 ค้นหาข้อมูล CHV MRC EX-Godown</h2>
+        
+        <div class="row mb-3">
+            <div class="col-md-6">
+                <input type="text" id="searchInput" class="form-control" placeholder="พิมพ์คำค้นหา (ชื่อ, รหัส, ฯลฯ)...">
+            </div>
+            <div class="col-md-6 text-end">
+                <small id="statusText" class="text-muted">กำลังรอโหลดข้อมูล...</small>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-striped table-hover table-bordered" id="dataTable">
+                <thead class="table-dark" id="tableHead">
+                    </thead>
+                <tbody id="tableBody">
+                    </tbody>
+            </table>
+        </div>
+        
+        <div id="loader" class="loading">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p>กำลังดึงข้อมูลจาก Google Sheet...</p>
+        </div>
+    </div>
+
+    <script>
+        // ----------------------------------------------------
+        // 🔴 วาง URL ของ Google Apps Script ที่คุณ Copy มาตรงนี้
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzRSN-sAPGu7NT4_M2R7FxgZvqhH1URhxMRp_hsy2KLCFylWvPP_Tkliayqo9yc-yik/exec"; 
+        // ----------------------------------------------------
+
+        let allData = []; // ตัวแปรเก็บข้อมูลทั้งหมด
+
+        // ฟังก์ชันดึงข้อมูลเมื่อเปิดหน้าเว็บ
+        async function fetchData() {
+            try {
+                const response = await fetch(SCRIPT_URL);
+                const data = await response.json();
+                
+                if (data.length > 0) {
+                    // แยกหัวตาราง (row 0) กับ ข้อมูล (row 1 เป็นต้นไป)
+                    const headers = data[0];
+                    allData = data.slice(1); 
+
+                    renderTable(headers, allData);
+                    document.getElementById('loader').style.display = 'none';
+                    document.getElementById('resultTable').style.display = 'table';
+                    document.getElementById('statusText').innerText = `พบข้อมูลทั้งหมด ${allData.length} รายการ`;
+                    
+                    // เปิดใช้งานช่องค้นหา
+                    document.getElementById('searchInput').addEventListener('keyup', (e) => {
+                        filterData(e.target.value, headers);
+                    });
+                }
+            } catch (error) {
+                document.getElementById('loader').innerHTML = `<span class="text-danger">เกิดข้อผิดพลาด: ${error.message}</span>`;
+            }
+        }
+
+        // ฟังก์ชันแสดงตาราง
+        function renderTable(headers, rows) {
+            const thead = document.getElementById('tableHead');
+            const tbody = document.getElementById('tableBody');
+
+            // สร้างหัวตารางแค่ครั้งเดียว
+            if (thead.innerHTML === "") {
+                let headerHTML = "<tr>";
+                headers.forEach(h => headerHTML += `<th>${h}</th>`);
+                headerHTML += "</tr>";
+                thead.innerHTML = headerHTML;
+            }
+
+            // สร้างเนื้อหาตาราง
+            let bodyHTML = "";
+            // จำกัดการแสดงผลไม่เกิน 100 แถวเพื่อไม่ให้เว็บค้าง (กรณีข้อมูลเยอะมาก)
+            const displayRows = rows.slice(0, 100); 
+            
+            if(displayRows.length === 0) {
+                bodyHTML = `<tr><td colspan="${headers.length}" class="text-center">ไม่พบข้อมูล</td></tr>`;
+            } else {
+                displayRows.forEach(row => {
+                    bodyHTML += "<tr>";
+                    row.forEach(cell => {
+                        // เช็คถ้าเป็นวันที่ให้แสดงให้อ่านง่าย (Optional)
+                        let cellData = cell;
+                        if (typeof cell === 'string' && cell.includes('T') && cell.length > 20) {
+                            cellData = new Date(cell).toLocaleDateString('th-TH');
+                        }
+                        bodyHTML += `<td>${cellData}</td>`;
+                    });
+                    bodyHTML += "</tr>";
+                });
+            }
+            tbody.innerHTML = bodyHTML;
+        }
+
+        // ฟังก์ชันค้นหา (Filter)
+        function filterData(keyword, headers) {
+            const lowerKeyword = keyword.toLowerCase();
+            
+            const filtered = allData.filter(row => {
+                // ค้นหาทุกคอลัมน์ในแถวนั้นๆ
+                return row.some(cell => 
+                    String(cell).toLowerCase().includes(lowerKeyword)
+                );
+            });
+
+            renderTable(headers, filtered);
+            document.getElementById('statusText').innerText = `ค้นหาเจอ ${filtered.length} รายการ`;
+        }
+
+        // เริ่มทำงาน
+        fetchData();
+    </script>
+
+</body>
+</html>
