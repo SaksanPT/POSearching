@@ -8,8 +8,12 @@
     <style>
         body { padding: 20px; background-color: #f8f9fa; }
         .loading { text-align: center; margin-top: 20px; color: #666; }
-        /* ซ่อนตารางตอนยังไม่โหลด */
-        #resultTable { display: none; }
+        #resultTable, #paginationNav { display: none; } /* ซ่อนตารางและปุ่มกดตอนยังไม่โหลด */
+        
+        /* ปรับแต่งปุ่มเปลี่ยนหน้า */
+        .page-link { cursor: pointer; color: #333; }
+        .page-item.active .page-link { background-color: #0d6efd; border-color: #0d6efd; color: white; }
+        .page-item.disabled .page-link { color: #ccc; pointer-events: none; }
     </style>
 </head>
 <body>
@@ -21,33 +25,43 @@
             <div class="col-md-6">
                 <input type="text" id="searchInput" class="form-control" placeholder="พิมพ์คำค้นหา (ชื่อ, รหัส, ฯลฯ)...">
             </div>
-            <div class="col-md-6 text-end">
+            <div class="col-md-6 text-end align-self-center">
                 <small id="statusText" class="text-muted">กำลังรอโหลดข้อมูล...</small>
             </div>
         </div>
 
-        <div class="table-responsive">
-            <table class="table table-striped table-hover table-bordered" id="dataTable">
+        <div class="table-responsive shadow-sm bg-white rounded p-2">
+            <table class="table table-striped table-hover table-bordered mb-0" id="dataTable">
                 <thead class="table-dark" id="tableHead">
                     </thead>
                 <tbody id="tableBody">
                     </tbody>
             </table>
         </div>
+
+        <nav id="paginationNav" class="mt-3">
+            <ul class="pagination justify-content-center" id="paginationList">
+                </ul>
+        </nav>
         
         <div id="loader" class="loading">
             <div class="spinner-border text-primary" role="status"></div>
-            <p>กำลังดึงข้อมูลจาก Google Sheet...</p>
+            <p class="mt-2">กำลังดึงข้อมูลจาก 3 ชีทมารวมกัน...</p>
         </div>
     </div>
 
     <script>
         // ----------------------------------------------------
-        // 🔴 วาง URL ของ Google Apps Script ที่คุณ Copy มาตรงนี้
+        // 🔴 อย่าลืมวาง URL ของ APPS SCRIPT ของคุณที่นี่
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzGQq10eZLrDvxrEEYwM3lqZGlToFuN7WMyQ9AoMdUpWae716vWefEoqxDvrGZxSxD7/exec"; 
         // ----------------------------------------------------
 
-        let allData = []; // ตัวแปรเก็บข้อมูลทั้งหมด
+        let allData = [];     // ข้อมูลทั้งหมด
+        let currentData = []; // ข้อมูลที่กำลังแสดง (หลังค้นหา)
+        
+        // --- ตั้งค่าการแบ่งหน้า ---
+        let currentPage = 1;      // หน้าปัจจุบัน
+        const rowsPerPage = 50;   // 🟢 จำนวนแถวต่อหน้า (แก้เลขนี้ถ้าอยากให้โชว์เยอะขึ้น)
 
         // ฟังก์ชันดึงข้อมูลเมื่อเปิดหน้าเว็บ
         async function fetchData() {
@@ -56,53 +70,62 @@
                 const data = await response.json();
                 
                 if (data.length > 0) {
-                    // แยกหัวตาราง (row 0) กับ ข้อมูล (row 1 เป็นต้นไป)
                     const headers = data[0];
-                    allData = data.slice(1); 
+                    allData = data.slice(1); // ตัดหัวตารางออกเก็บไว้ที่ headers
+                    currentData = allData;   // เริ่มต้นให้แสดงทั้งหมด
 
-                    renderTable(headers, allData);
+                    // สร้างหัวตาราง
+                    createTableHeader(headers);
+
+                    // แสดงผลหน้าแรก
+                    renderTable();
+                    
                     document.getElementById('loader').style.display = 'none';
-                    document.getElementById('resultTable').style.display = 'table';
-                    document.getElementById('statusText').innerText = `พบข้อมูลทั้งหมด ${allData.length} รายการ`;
+                    document.getElementById('resultTable').style.display = 'block';
+                    document.getElementById('paginationNav').style.display = 'flex';
                     
                     // เปิดใช้งานช่องค้นหา
                     document.getElementById('searchInput').addEventListener('keyup', (e) => {
-                        filterData(e.target.value, headers);
+                        filterData(e.target.value);
                     });
                 }
             } catch (error) {
-                document.getElementById('loader').innerHTML = `<span class="text-danger">เกิดข้อผิดพลาด: ${error.message}</span>`;
+                document.getElementById('loader').innerHTML = `<span class="text-danger">เกิดข้อผิดพลาด: ${error.message} <br> (กรุณาเช็ค URL และการ Deploy)</span>`;
             }
         }
 
-        // ฟังก์ชันแสดงตาราง
-        function renderTable(headers, rows) {
-            const thead = document.getElementById('tableHead');
+        function createTableHeader(headers) {
+            let headerHTML = "<tr>";
+            headers.forEach(h => headerHTML += `<th>${h}</th>`);
+            headerHTML += "</tr>";
+            document.getElementById('tableHead').innerHTML = headerHTML;
+        }
+
+        // ฟังก์ชันแสดงตาราง (ตามหน้า)
+        function renderTable() {
             const tbody = document.getElementById('tableBody');
-
-            // สร้างหัวตารางแค่ครั้งเดียว
-            if (thead.innerHTML === "") {
-                let headerHTML = "<tr>";
-                headers.forEach(h => headerHTML += `<th>${h}</th>`);
-                headerHTML += "</tr>";
-                thead.innerHTML = headerHTML;
-            }
-
-            // สร้างเนื้อหาตาราง
-            let bodyHTML = "";
-            // จำกัดการแสดงผลไม่เกิน 100 แถวเพื่อไม่ให้เว็บค้าง (กรณีข้อมูลเยอะมาก)
-            const displayRows = rows.slice(0, 100); 
             
-            if(displayRows.length === 0) {
-                bodyHTML = `<tr><td colspan="${headers.length}" class="text-center">ไม่พบข้อมูล</td></tr>`;
+            // คำนวณจุดเริ่มต้นและสิ้นสุดของข้อมูลในหน้านั้น
+            const startIndex = (currentPage - 1) * rowsPerPage;
+            const endIndex = startIndex + rowsPerPage;
+            
+            // ตัดข้อมูลเฉพาะส่วนที่จะโชว์
+            const pageData = currentData.slice(startIndex, endIndex);
+            
+            let bodyHTML = "";
+            
+            if(pageData.length === 0) {
+                // กรณีค้นหาไม่เจอ
+                const colSpan = document.getElementById('tableHead').rows[0].cells.length;
+                bodyHTML = `<tr><td colspan="${colSpan}" class="text-center py-4">ไม่พบข้อมูล</td></tr>`;
             } else {
-                displayRows.forEach(row => {
+                pageData.forEach(row => {
                     bodyHTML += "<tr>";
                     row.forEach(cell => {
-                        // เช็คถ้าเป็นวันที่ให้แสดงให้อ่านง่าย (Optional)
+                        // เช็ค format วันที่
                         let cellData = cell;
                         if (typeof cell === 'string' && cell.includes('T') && cell.length > 20) {
-                            cellData = new Date(cell).toLocaleDateString('th-TH');
+                            try { cellData = new Date(cell).toLocaleDateString('th-TH'); } catch(e){}
                         }
                         bodyHTML += `<td>${cellData}</td>`;
                     });
@@ -110,21 +133,75 @@
                 });
             }
             tbody.innerHTML = bodyHTML;
+
+            // อัปเดตข้อความสถานะ
+            document.getElementById('statusText').innerText = `ทั้งหมด ${currentData.length} รายการ (แสดงหน้า ${currentPage})`;
+
+            // สร้างปุ่มกดเปลี่ยนหน้า
+            renderPaginationButtons();
         }
 
-        // ฟังก์ชันค้นหา (Filter)
-        function filterData(keyword, headers) {
+        // ฟังก์ชันสร้างปุ่มเปลี่ยนหน้า
+        function renderPaginationButtons() {
+            const paginationList = document.getElementById('paginationList');
+            const totalPages = Math.ceil(currentData.length / rowsPerPage);
+            
+            if (totalPages <= 1) {
+                paginationList.innerHTML = ""; // ถ้ามีหน้าเดียวไม่ต้องโชว์ปุ่ม
+                return;
+            }
+
+            let html = "";
+
+            // ปุ่ม "ก่อนหน้า"
+            html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+                        <a class="page-link" onclick="changePage(${currentPage - 1})">ก่อนหน้า</a>
+                     </li>`;
+
+            // แสดงเลขหน้า (จำกัดจำนวนปุ่มไม่ให้ยาวเกินไป)
+            let startPage = Math.max(1, currentPage - 2);
+            let endPage = Math.min(totalPages, currentPage + 2);
+
+            if (startPage > 1) html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+
+            for (let i = startPage; i <= endPage; i++) {
+                html += `<li class="page-item ${i === currentPage ? 'active' : ''}">
+                            <a class="page-link" onclick="changePage(${i})">${i}</a>
+                         </li>`;
+            }
+
+            if (endPage < totalPages) html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+
+            // ปุ่ม "ถัดไป"
+            html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+                        <a class="page-link" onclick="changePage(${currentPage + 1})">ถัดไป</a>
+                     </li>`;
+
+            paginationList.innerHTML = html;
+        }
+
+        // ฟังก์ชันเปลี่ยนหน้า
+        window.changePage = function(page) {
+            currentPage = page;
+            renderTable();
+            // เลื่อนจอขึ้นไปบนสุดของตาราง
+            // document.getElementById('dataTable').scrollIntoView({behavior: 'smooth'}); 
+        }
+
+        // ฟังก์ชันค้นหา
+        function filterData(keyword) {
             const lowerKeyword = keyword.toLowerCase();
             
-            const filtered = allData.filter(row => {
-                // ค้นหาทุกคอลัมน์ในแถวนั้นๆ
+            // กรองข้อมูลจากทั้งหมด เก็บใส่ currentData
+            currentData = allData.filter(row => {
                 return row.some(cell => 
                     String(cell).toLowerCase().includes(lowerKeyword)
                 );
             });
 
-            renderTable(headers, filtered);
-            document.getElementById('statusText').innerText = `ค้นหาเจอ ${filtered.length} รายการ`;
+            // *สำคัญ* รีเซ็ตกลับไปหน้า 1 ทุกครั้งที่มีการค้นหาใหม่
+            currentPage = 1;
+            renderTable();
         }
 
         // เริ่มทำงาน
