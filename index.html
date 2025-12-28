@@ -206,7 +206,7 @@
                 <div class="col-md-9">
                     <div class="input-group shadow-sm" style="border-radius: 50px; overflow: hidden;">
                         <span class="input-group-text bg-white border-0 ps-3"><i class="fas fa-search text-muted"></i></span>
-                        <input type="text" id="searchInput" class="form-control border-0 py-2" placeholder="พิมพ์เลข PO เพื่อค้นหา...">
+                        <input type="text" id="searchInput" class="form-control border-0 py-2" placeholder="พิมพ์เลข PO, ชื่อสถานี, วันที่ หรือสถานะ เพื่อค้นหา...">
                     </div>
                 </div>
                 <div class="col-md-3">
@@ -246,12 +246,17 @@
     </div>
 
     <script>
-        // 🟢 URL Apps Script (ตรวจสอบให้ถูกต้อง)
+        // 🟢 URL Apps Script
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbySB82ezMwS67wsHDOPvINwK1BFoaVxYz1moaYFUv1TOMC9yflcu-edYCZS79AOjNdS/exec";
         
+        // 🔧 MAP หัวข้อคอลัมน์จาก Excel ให้ตรงกับตัวแปร
         const COL_MAP = {
-            PO: "PO", WAREHOUSE: "รหัสคลัง", STATUS: "สถานะ", 
-            DATE: "วันที่จัดส่ง", STATION: "สถานที่จุดส่ง"
+            PO: "PO", 
+            WAREHOUSE: "รหัสคลัง", 
+            STATUS: "สถานะ", 
+            DATE: "วันที่จัดส่ง", 
+            STATION: "สถานที่จุดส่ง",
+            POINT: "รหัสจุดจัดส่ง" // ✅ เพิ่มช่องนี้
         };
 
         let currentUserRole = ""; 
@@ -355,16 +360,13 @@
         async function fetchData() {
             try {
                 const response = await fetch(`${SCRIPT_URL}?action=getData`);
-                // 🟢 ปรับการรับค่า JSON (เพราะหลังบ้านส่งเป็น Object {data:[], lastUpdate:""})
                 const result = await response.json(); 
                 
-                // ตรวจสอบโครงสร้างข้อมูล
                 let rawData = [];
                 if (Array.isArray(result)) {
-                    rawData = result; // รองรับกรณีโค้ดเก่า
+                    rawData = result;
                 } else if (result.data) {
                     rawData = result.data;
-                    // 🟢 อัปเดตเวลาล่าสุดบนหน้าจอ
                     if(result.lastUpdate) {
                         document.getElementById('lastUpdateDisplay').innerText = result.lastUpdate;
                     }
@@ -372,10 +374,15 @@
 
                 if (rawData && rawData.length > 0) {
                     const headers = rawData[0]; globalHeaders = headers; 
+                    
+                    // 🔧 เก็บ Index ของคอลัมน์ต่างๆ
                     colIndexes = {
-                        PO: headers.indexOf(COL_MAP.PO), WAREHOUSE: headers.indexOf(COL_MAP.WAREHOUSE),
-                        STATUS: headers.indexOf(COL_MAP.STATUS), DATE: headers.indexOf(COL_MAP.DATE),
-                        STATION: headers.indexOf(COL_MAP.STATION)
+                        PO: headers.indexOf(COL_MAP.PO), 
+                        WAREHOUSE: headers.indexOf(COL_MAP.WAREHOUSE),
+                        STATUS: headers.indexOf(COL_MAP.STATUS), 
+                        DATE: headers.indexOf(COL_MAP.DATE),
+                        STATION: headers.indexOf(COL_MAP.STATION),
+                        POINT: headers.indexOf(COL_MAP.POINT) // ✅ เพิ่ม Point
                     };
                     masterData = rawData.slice(1); 
                     updateDataBySource();
@@ -429,13 +436,20 @@
             renderLimit = LOAD_STEP; renderCards();
         }
 
+        // 🔧 ฟังก์ชันค้นหาแบบใหม่: หาในทุกคอลัมน์
         window.performSearch = function() {
             const rawKeyword = document.getElementById('searchInput').value.toLowerCase().trim();
             if (rawKeyword !== "") {
                 const searchTerms = rawKeyword.split(/[\s,]+/).filter(term => term.length > 0);
-                const idxPO = colIndexes.PO;
-                activeSearchResults = activeSourceData.filter(row => { const poValue = String(row[idxPO] || "").toLowerCase(); return searchTerms.some(term => poValue.includes(term)); });
+                
+                activeSearchResults = activeSourceData.filter(row => {
+                    // รวมข้อมูลทั้งแถวเป็น String เดียว
+                    const rowString = row.map(cell => String(cell || "").toLowerCase()).join(" ");
+                    // ตรวจสอบว่ามีคำค้นหาอยู่ใน String นั้นหรือไม่ (หาได้ทุกช่อง)
+                    return searchTerms.some(term => rowString.includes(term));
+                });
             } else { activeSearchResults = activeSourceData; }
+            
             createWarehouseButtons(activeSearchResults);
             if (currentUserWarehouse !== "") selectedWarehouse = currentUserWarehouse; else selectedWarehouse = 'ALL'; 
             renderFinalView();
@@ -460,7 +474,11 @@
             const vendorStyles = { 'CHV': { name: 'Chevron', bg: '#0d6efd' }, 'MRC': { name: 'Miracle', bg: '#198754' }, 'EX-Godown': { name: 'PSP', bg: '#ffc107', text: 'black' } };
 
             currentDisplayData.forEach(row => {
-                const po = row[colIndexes.PO] || "-"; const wh = row[colIndexes.WAREHOUSE] || "-";
+                const po = row[colIndexes.PO] || "-"; 
+                const wh = row[colIndexes.WAREHOUSE] || "-";
+                // 🟢 ดึงค่ารหัสจุดจัดส่ง
+                const point = row[colIndexes.POINT] || "-"; 
+                
                 let status = (row[0] === 'EX-Godown') ? String(row[3] || "").trim() : String(row[colIndexes.STATUS] || "").trim();
                 
                 let bucket = "PENDING"; let cardClass = "card-border-warning"; let statusBadge = `<span class="status-badge bg-warning text-dark">${status || 'ระหว่างส่ง'}</span>`;
@@ -480,7 +498,22 @@
                     const station = row[colIndexes.STATION] || "-";
                     const vendorCode = row[0];
                     const vendorInfo = vendorStyles[vendorCode] || { name: vendorCode, bg: '#6c757d' };
-                    const cardHTML = `<div class="po-card ${cardClass}"><div class="po-header"><span>PO: ${po}</span><span class="vendor-tag" style="background:${vendorInfo.bg}; color:${vendorInfo.text||'white'}">${vendorInfo.name}</span></div><div class="po-body"><div class="info-row"><div class="info-label">ชื่อคลัง:</div><div class="info-value text-truncate">${wh}</div></div><div class="info-row"><div class="info-label">ชื่อสถานี:</div><div class="info-value text-truncate">${station}</div></div><div class="info-row"><div class="info-label">วันที่ถึง:</div><div class="info-value">${dateVal}</div></div><div class="mt-2 d-flex justify-content-between align-items-center"><small class="text-muted">สถานะ:</small> ${statusBadge}</div></div></div>`;
+                    
+                    // 🟢 เพิ่ม info-row สำหรับ "รหัสจุดส่ง" ในการ์ด
+                    const cardHTML = `
+                    <div class="po-card ${cardClass}">
+                        <div class="po-header">
+                            <span>PO: ${po}</span>
+                            <span class="vendor-tag" style="background:${vendorInfo.bg}; color:${vendorInfo.text||'white'}">${vendorInfo.name}</span>
+                        </div>
+                        <div class="po-body">
+                            <div class="info-row"><div class="info-label">ชื่อคลัง:</div><div class="info-value text-truncate">${wh}</div></div>
+                            <div class="info-row"><div class="info-label">รหัสจุดส่ง:</div><div class="info-value text-truncate fw-bold text-primary">${point}</div></div>
+                            <div class="info-row"><div class="info-label">ชื่อสถานี:</div><div class="info-value text-truncate">${station}</div></div>
+                            <div class="info-row"><div class="info-label">วันที่ถึง:</div><div class="info-value">${dateVal}</div></div>
+                            <div class="mt-2 d-flex justify-content-between align-items-center"><small class="text-muted">สถานะ:</small> ${statusBadge}</div>
+                        </div>
+                    </div>`;
                     if (bucket === "SUCCESS") htmlSuccess += cardHTML; else if (bucket === "FAILED") htmlFailed += cardHTML; else htmlPending += cardHTML;
                 }
             });
